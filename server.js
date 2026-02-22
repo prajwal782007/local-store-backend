@@ -6,8 +6,8 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
 const Product = require("./models/product");
-const Store = require("./models/Store");
-const Order = require("./models/Order");
+const Store = require("./models/store");
+const Order = require("./models/order");
 
 const app = express();
 
