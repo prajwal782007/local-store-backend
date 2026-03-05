@@ -32,14 +32,9 @@ const authMiddleware = (req, res, next) => {
 
   const token = authHeader.split(" ")[1];
 
-  if (!token) {
-    return res.status(401).json({ error: "Token missing" });
-  }
-
   try {
 
     const decoded = jwt.verify(token, "secretkey");
-
     req.storeId = decoded.id;
 
     next();
@@ -49,6 +44,7 @@ const authMiddleware = (req, res, next) => {
     return res.status(401).json({ error: "Invalid token" });
 
   }
+
 };
 
 
@@ -85,7 +81,6 @@ app.post("/store-register", async (req, res) => {
 
   } catch (error) {
 
-    console.log(error);
     res.status(500).json({ error: "Error registering store" });
 
   }
@@ -125,7 +120,6 @@ app.post("/store-login", async (req, res) => {
 
   } catch (error) {
 
-    console.log(error);
     res.status(500).json({ error: "Error logging in" });
 
   }
@@ -153,7 +147,6 @@ app.post("/add-product", authMiddleware, async (req, res) => {
 
   } catch (error) {
 
-    console.log(error);
     res.status(500).json({ error: "Error adding product" });
 
   }
@@ -223,29 +216,24 @@ app.post("/place-order", async (req, res) => {
 
     }
 
-    const otp = Math.floor(1000 + Math.random() * 9000).toString();
-    const bagNumber = Math.floor(1 + Math.random() * 100);
-
     const newOrder = new Order({
       store: storeId,
       products,
       totalAmount,
-      otp,
-      bagNumber
+      status: "pending",
+      otp: null,
+      bagNumber: null
     });
 
     await newOrder.save();
 
     res.json({
       message: "Order placed successfully",
-      totalAmount,
-      bagNumber,
-      otp
+      orderId: newOrder._id
     });
 
   } catch (error) {
 
-    console.log(error);
     res.status(500).json({ error: "Error placing order" });
 
   }
@@ -265,7 +253,6 @@ app.get("/store-orders", authMiddleware, async (req, res) => {
 
   } catch (error) {
 
-    console.log(error);
     res.status(500).json({ error: "Error fetching orders" });
 
   }
@@ -287,15 +274,27 @@ app.patch("/accept-order/:orderId", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
+    if (order.status !== "pending") {
+      return res.status(400).json({ error: "Order already processed" });
+    }
+
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    const bagNumber = Math.floor(1 + Math.random() * 100);
+
     order.status = "accepted";
+    order.otp = otp;
+    order.bagNumber = bagNumber;
 
     await order.save();
 
-    res.json({ message: "Order accepted successfully" });
+    res.json({
+      message: "Order accepted",
+      otp,
+      bagNumber
+    });
 
   } catch (error) {
 
-    console.log(error);
     res.status(500).json({ error: "Error accepting order" });
 
   }
@@ -331,8 +330,33 @@ app.patch("/complete-order/:orderId", authMiddleware, async (req, res) => {
 
   } catch (error) {
 
-    console.log(error);
     res.status(500).json({ error: "Error completing order" });
+
+  }
+
+});
+
+
+// ================= ORDER STATUS =================
+app.get("/order-status/:orderId", async (req, res) => {
+
+  try {
+
+    const order = await Order.findById(req.params.orderId);
+
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    res.json({
+      status: order.status,
+      otp: order.otp,
+      bagNumber: order.bagNumber
+    });
+
+  } catch (error) {
+
+    res.status(500).json({ error: "Error fetching order status" });
 
   }
 
