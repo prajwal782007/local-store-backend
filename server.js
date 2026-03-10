@@ -4,6 +4,8 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const http = require("http");
+const { Server } = require("socket.io");
 
 const Product = require("./models/product");
 const Store = require("./models/store");
@@ -14,6 +16,15 @@ const app = express();
 // ================= MIDDLEWARE =================
 app.use(cors());
 app.use(express.json());
+
+// ================= HTTP + SOCKET SERVER =================
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: {
+    origin: "*"
+  }
+});
 
 // ================= DATABASE =================
 mongoose.connect(process.env.MONGO_URI)
@@ -172,6 +183,33 @@ app.get("/products", async (req, res) => {
 
 });
 
+// ================= DELETE PRODUCT =================
+
+app.delete("/delete-product/:productId", authMiddleware, async (req, res) => {
+
+  try {
+
+    const product = await Product.findOne({
+      _id: req.params.productId,
+      store: req.storeId
+    });
+
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    await Product.findByIdAndDelete(req.params.productId);
+
+    res.json({ message: "Product deleted successfully" });
+
+  } catch (error) {
+
+    res.status(500).json({ error: "Error deleting product" });
+
+  }
+
+});
+
 
 // ================= PLACE ORDER =================
 app.post("/place-order", async (req, res) => {
@@ -274,10 +312,6 @@ app.patch("/accept-order/:orderId", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    if (order.status !== "pending") {
-      return res.status(400).json({ error: "Order already processed" });
-    }
-
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
     const bagNumber = Math.floor(1 + Math.random() * 100);
 
@@ -286,6 +320,13 @@ app.patch("/accept-order/:orderId", authMiddleware, async (req, res) => {
     order.bagNumber = bagNumber;
 
     await order.save();
+
+    // 🔴 REAL-TIME EVENT
+    io.emit("orderAccepted", {
+      orderId: order._id,
+      otp: order.otp,
+      bagNumber: order.bagNumber
+    });
 
     res.json({
       message: "Order accepted",
@@ -296,41 +337,6 @@ app.patch("/accept-order/:orderId", authMiddleware, async (req, res) => {
   } catch (error) {
 
     res.status(500).json({ error: "Error accepting order" });
-
-  }
-
-});
-
-
-// ================= COMPLETE ORDER =================
-app.patch("/complete-order/:orderId", authMiddleware, async (req, res) => {
-
-  try {
-
-    const { otp } = req.body;
-
-    const order = await Order.findOne({
-      _id: req.params.orderId,
-      store: req.storeId
-    });
-
-    if (!order) {
-      return res.status(404).json({ error: "Order not found" });
-    }
-
-    if (order.otp !== otp) {
-      return res.status(400).json({ error: "Invalid OTP" });
-    }
-
-    order.status = "completed";
-
-    await order.save();
-
-    res.json({ message: "Order completed successfully" });
-
-  } catch (error) {
-
-    res.status(500).json({ error: "Error completing order" });
 
   }
 
@@ -361,44 +367,49 @@ app.get("/order-status/:orderId", async (req, res) => {
   }
 
 });
+// ================= DASHBOARD STATS =================
 
-
-// ================= TOGGLE STORE =================
-app.patch("/toggle-store", authMiddleware, async (req, res) => {
+app.get("/dashboard-stats", authMiddleware, async (req, res) => {
 
   try {
 
-    const store = await Store.findById(req.storeId);
+    const today = new Date();
+    today.setHours(0,0,0,0);
 
-    store.isOpen = !store.isOpen;
-
-    await store.save();
-
-    res.json({
-      message: `Store is now ${store.isOpen ? "Open" : "Closed"}`
+    const orders = await Order.find({
+      store: req.storeId,
+      createdAt: { $gte: today }
     });
 
-  } catch (error) {
+    let pending = 0;
+    let accepted = 0;
+    let completed = 0;
+    let revenue = 0;
 
-    res.status(500).json({ error: "Error updating store status" });
+    orders.forEach(order => {
 
-  }
+      if(order.status === "pending") pending++;
 
-});
+      if(order.status === "accepted") accepted++;
 
+      if(order.status === "completed") {
+        completed++;
+        revenue += order.totalAmount;
+      }
 
-// ================= ALL STORES =================
-app.get("/all-stores", async (req, res) => {
+    });
 
-  try {
+    res.json({
+      totalOrders: orders.length,
+      pendingOrders: pending,
+      acceptedOrders: accepted,
+      completedOrders: completed,
+      revenue: revenue
+    });
 
-    const stores = await Store.find();
+  } catch(error){
 
-    res.json(stores);
-
-  } catch (err) {
-
-    res.status(500).json({ error: "Error fetching stores" });
+    res.status(500).json({ error: "Dashboard stats error" });
 
   }
 
@@ -408,6 +419,6 @@ app.get("/all-stores", async (req, res) => {
 // ================= START SERVER =================
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
