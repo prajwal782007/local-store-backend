@@ -8,7 +8,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "IS",
   "type": "commonjs",
   "dependencies": {
     "bcryptjs": "^3.0.3",
